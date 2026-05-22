@@ -28,6 +28,19 @@ def is_futures_plan(plan_type):
     return "futures" in str(plan_type).lower()
 
 
+def safe_set_column_widths(writer, sheet_name, df_out):
+    """Safely auto-fit Excel columns without failing on mixed/Arrow-backed values."""
+    ws = writer.sheets[sheet_name]
+    for idx, col in enumerate(df_out.columns):
+        try:
+            values = df_out[col].tolist()
+            max_value_len = max((len(str(v)) for v in values), default=0)
+            max_len = min(max(max_value_len, len(str(col))) + 2, 80)
+        except Exception:
+            max_len = min(len(str(col)) + 2, 80)
+        ws.set_column(idx, idx, max_len)
+
+
 @st.cache_data
 def load_shared_order_list(file_content, filename):
     """Load one combined Order-list file and parse dates once."""
@@ -223,10 +236,7 @@ with tab_zen:
             df_futures[cols].to_excel(writer, sheet_name='Futures', index=False)
             df_summary.to_excel(writer, sheet_name='Revenue Summary', index=False)
             for sheet_name, df_out in [('CFD', df_cfd), ('Futures', df_futures), ('Revenue Summary', df_summary)]:
-                ws = writer.sheets[sheet_name]
-                for idx, col in enumerate(df_out.columns):
-                    max_len = max(df_out[col].astype(str).map(len).max(), len(col)) + 2
-                    ws.set_column(idx, idx, max_len)
+                safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
             label="Download ZEN Comparison Report",
@@ -369,10 +379,7 @@ with tab_bp:
             df_futures2[cols_bp].to_excel(writer, sheet_name='Futures', index=False)
             df_summary2.to_excel(writer, sheet_name='Revenue Summary', index=False)
             for sheet_name, df_out in [('CFD', df_cfd2), ('Futures', df_futures2), ('Revenue Summary', df_summary2)]:
-                ws = writer.sheets[sheet_name]
-                for idx, col in enumerate(df_out.columns):
-                    max_len = max(df_out[col].astype(str).map(len).max(), len(col)) + 2
-                    ws.set_column(idx, idx, max_len)
+                safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
             label="Download BridgerPay Comparison Report",
@@ -516,10 +523,7 @@ with tab_coins:
             df_futures3[cols_coins].to_excel(writer, sheet_name='Futures', index=False)
             df_summary3.to_excel(writer, sheet_name='Revenue Summary', index=False)
             for sheet_name, df_out in [('CFD', df_cfd3), ('Futures', df_futures3), ('Revenue Summary', df_summary3)]:
-                ws = writer.sheets[sheet_name]
-                for idx, col in enumerate(df_out.columns):
-                    max_len = max(df_out[col].astype(str).map(len).max(), len(col)) + 2
-                    ws.set_column(idx, idx, max_len)
+                safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
             label="Download Coins Buy Comparison Report",
@@ -686,13 +690,7 @@ with tab_confirmo:
             df_summary_conf.to_excel(writer, sheet_name='Revenue Summary', index=False)
 
             for sheet_name, df_out in [('CFD', df_cfd_conf[cols_conf]), ('Futures', df_futures_conf[cols_conf]), ('Revenue Summary', df_summary_conf)]:
-                ws = writer.sheets[sheet_name]
-                for idx, col in enumerate(df_out.columns):
-                    try:
-                        max_len = max(df_out[col].astype(str).map(len).max(), len(col)) + 2
-                    except Exception:
-                        max_len = len(col) + 2
-                    ws.set_column(idx, idx, max_len)
+                safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
             label="Download Confirmo Comparison Report",
@@ -827,10 +825,7 @@ with tab_payprocc:
             
             # Auto-adjust column widths
             for sheet_name, df_out in [('CFD', df_cfd_pp), ('Futures', df_futures_pp), ('Revenue Summary', df_summary_pp)]:
-                ws = writer.sheets[sheet_name]
-                for idx, col in enumerate(df_out.columns):
-                    max_len = max(df_out[col].astype(str).map(len).max(), len(col)) + 2
-                    ws.set_column(idx, idx, max_len)
+                safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
             label="Download PayProcc Revenue Report",

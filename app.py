@@ -41,6 +41,12 @@ def safe_set_column_widths(writer, sheet_name, df_out):
         ws.set_column(idx, idx, max_len)
 
 
+def display_summary_table(df):
+    """Display summary with a clean column name for transaction count."""
+    display_df = df.rename(columns={"Transaction_Count": "Transaction Count"})
+    st.dataframe(display_df, use_container_width=True)
+
+
 @st.cache_data
 def load_shared_order_list(file_content, filename):
     """Load one combined Order-list file and parse dates once."""
@@ -223,10 +229,10 @@ with tab_zen:
             df_cfd[["Date", "Category", "transaction_amount"]],
             df_futures[["Date", "Category", "transaction_amount"]]
         ])
-        df_summary = df_summary.groupby(["Date", "Category"], as_index=False).agg(Revenue=("transaction_amount", "sum")).sort_values("Date")
+        df_summary = df_summary.groupby(["Date", "Category"], as_index=False).agg(Revenue=("transaction_amount", "sum"), Transaction_Count=("transaction_amount", "count")).sort_values("Date")
 
         st.subheader("Datewise Revenue Summary (GMT+6)")
-        st.dataframe(df_summary)
+        display_summary_table(df_summary)
 
         # Excel output for ZEN
         output = io.BytesIO()
@@ -366,10 +372,10 @@ with tab_bp:
             df_cfd2[["Date", "Category", "amount"]],
             df_futures2[["Date", "Category", "amount"]]
         ])
-        df_summary2 = df_summary2.groupby(["Date", "Category"], as_index=False).agg(Revenue=("amount", "sum")).sort_values("Date")
+        df_summary2 = df_summary2.groupby(["Date", "Category"], as_index=False).agg(Revenue=("amount", "sum"), Transaction_Count=("amount", "count")).sort_values("Date")
 
         st.subheader("Datewise Revenue Summary (GMT+6)")
-        st.dataframe(df_summary2)
+        display_summary_table(df_summary2)
 
         # Excel output for BP
         output2 = io.BytesIO()
@@ -510,10 +516,10 @@ with tab_coins:
             df_cfd3[["Date", "Category", "calculated_amount"]],
             df_futures3[["Date", "Category", "calculated_amount"]]
         ])
-        df_summary3 = df_summary3.groupby(["Date", "Category"], as_index=False).agg(Revenue=("calculated_amount", "sum"))
+        df_summary3 = df_summary3.groupby(["Date", "Category"], as_index=False).agg(Revenue=("calculated_amount", "sum"), Transaction_Count=("calculated_amount", "count"))
 
         st.subheader("Datewise Revenue Summary (GMT+6)")
-        st.dataframe(df_summary3)
+        display_summary_table(df_summary3)
 
         # Excel output for Coins Buy
         output3 = io.BytesIO()
@@ -674,10 +680,10 @@ with tab_confirmo:
             df_cfd_conf[["Date", "Category", "Calculated Revenue"]],
             df_futures_conf[["Date", "Category", "Calculated Revenue"]]
         ])
-        df_summary_conf = df_summary_conf.groupby(["Date", "Category"], as_index=False).agg(Revenue=("Calculated Revenue", "sum")).sort_values("Date")
+        df_summary_conf = df_summary_conf.groupby(["Date", "Category"], as_index=False).agg(Revenue=("Calculated Revenue", "sum"), Transaction_Count=("Calculated Revenue", "count")).sort_values("Date")
 
         st.subheader("Datewise Revenue Summary (GMT+6)")
-        st.dataframe(df_summary_conf)
+        display_summary_table(df_summary_conf)
 
         # Excel output for Confirmo
         output_conf = io.BytesIO()
@@ -809,10 +815,10 @@ with tab_payprocc:
             df_cfd_pp[["Date", "Category", "Final Amount"]],
             df_futures_pp[["Date", "Category", "Final Amount"]]
         ])
-        df_summary_pp = df_summary_pp.groupby(["Date", "Category"], as_index=False).agg(Revenue=("Final Amount", "sum"))
+        df_summary_pp = df_summary_pp.groupby(["Date", "Category"], as_index=False).agg(Revenue=("Final Amount", "sum"), Transaction_Count=("Final Amount", "count"))
         
         st.subheader("Datewise Revenue Summary")
-        st.dataframe(df_summary_pp)
+        display_summary_table(df_summary_pp)
         
         # Excel output for PayProcc
         st.subheader("Step 7: Download Report")
@@ -874,7 +880,7 @@ with tab_summary:
         df_combined = pd.concat(summaries, ignore_index=True)
         
         # Group by Date, Category, and Gateway
-        df_combined_grouped = df_combined.groupby(["Date", "Category", "Gateway"], as_index=False).agg(Revenue=("Revenue", "sum"))
+        df_combined_grouped = df_combined.groupby(["Date", "Category", "Gateway"], as_index=False).agg(Revenue=("Revenue", "sum"), Transaction_Count=("Transaction_Count", "sum"))
         
         st.success(f"Showing data from: {', '.join(gateways_processed)}")
         
@@ -885,7 +891,7 @@ with tab_summary:
         df_pivot = df_combined_grouped.pivot_table(
             index='Date', 
             columns=['Category', 'Gateway'], 
-            values='Revenue', 
+            values=['Revenue', 'Transaction_Count'], 
             fill_value=0,
             aggfunc='sum'
         ).reset_index()
@@ -894,17 +900,20 @@ with tab_summary:
         
         # Total by Gateway
         st.subheader("Total Revenue by Gateway")
-        df_gateway_totals = df_combined_grouped.groupby("Gateway", as_index=False).agg(Total=("Revenue", "sum"))
-        st.dataframe(df_gateway_totals)
+        df_gateway_totals = df_combined_grouped.groupby("Gateway", as_index=False).agg(Total_Revenue=("Revenue", "sum"), Transaction_Count=("Transaction_Count", "sum"))
+        st.dataframe(df_gateway_totals.rename(columns={"Total_Revenue": "Total Revenue", "Transaction_Count": "Transaction Count"}), use_container_width=True)
         
         # Total by Category
         st.subheader("Total Revenue by Category")
-        df_category_totals = df_combined_grouped.groupby("Category", as_index=False).agg(Total=("Revenue", "sum"))
-        st.dataframe(df_category_totals)
+        df_category_totals = df_combined_grouped.groupby("Category", as_index=False).agg(Total_Revenue=("Revenue", "sum"), Transaction_Count=("Transaction_Count", "sum"))
+        st.dataframe(df_category_totals.rename(columns={"Total_Revenue": "Total Revenue", "Transaction_Count": "Transaction Count"}), use_container_width=True)
         
         # Grand Total
         grand_total = df_combined_grouped["Revenue"].sum()
-        st.metric("Grand Total Revenue", f"${grand_total:,.2f}")
+        total_transactions = int(df_combined_grouped["Transaction_Count"].sum())
+        metric_col1, metric_col2 = st.columns(2)
+        metric_col1.metric("Grand Total Revenue", f"${grand_total:,.2f}")
+        metric_col2.metric("Total Transactions", f"{total_transactions:,}")
         
         # Download combined summary
         output_summary = io.BytesIO()

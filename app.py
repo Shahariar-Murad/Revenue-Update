@@ -884,10 +884,46 @@ with tab_summary:
         
         st.success(f"Showing data from: {', '.join(gateways_processed)}")
         
+        # Date-wise total summary
+        st.subheader("Date-wise Total Revenue and Transactions")
+        df_date_totals = df_combined_grouped.groupby("Date", as_index=False).agg(
+            Total_Revenue=("Revenue", "sum"),
+            Transaction_Count=("Transaction_Count", "sum")
+        ).sort_values("Date")
+        st.dataframe(
+            df_date_totals.rename(columns={"Total_Revenue": "Total Revenue", "Transaction_Count": "Transaction Count"}),
+            use_container_width=True
+        )
+
+        # Date-wise gateway summary
+        st.subheader("Date-wise Revenue by Gateway")
+        df_date_gateway = df_combined_grouped.groupby(["Date", "Gateway"], as_index=False).agg(
+            Total_Revenue=("Revenue", "sum"),
+            Transaction_Count=("Transaction_Count", "sum")
+        ).sort_values(["Date", "Gateway"])
+        st.dataframe(
+            df_date_gateway.rename(columns={"Total_Revenue": "Total Revenue", "Transaction_Count": "Transaction Count"}),
+            use_container_width=True
+        )
+
+        # Date-wise category summary
+        st.subheader("Date-wise Revenue by Category")
+        df_date_category = df_combined_grouped.groupby(["Date", "Category"], as_index=False).agg(
+            Total_Revenue=("Revenue", "sum"),
+            Transaction_Count=("Transaction_Count", "sum")
+        ).sort_values(["Date", "Category"])
+        st.dataframe(
+            df_date_category.rename(columns={"Total_Revenue": "Total Revenue", "Transaction_Count": "Transaction Count"}),
+            use_container_width=True
+        )
+
         # Show combined summary
-        st.subheader("Combined Revenue by Date and Category")
+        st.subheader("Detailed Combined Revenue by Date, Category and Gateway")
+        df_detailed_display = df_combined_grouped.rename(columns={"Transaction_Count": "Transaction Count"}).sort_values(["Date", "Category", "Gateway"])
+        st.dataframe(df_detailed_display, use_container_width=True)
         
         # Pivot table for better visualization
+        st.subheader("Pivot View: Date-wise Revenue and Count")
         df_pivot = df_combined_grouped.pivot_table(
             index='Date', 
             columns=['Category', 'Gateway'], 
@@ -918,9 +954,18 @@ with tab_summary:
         # Download combined summary
         output_summary = io.BytesIO()
         with pd.ExcelWriter(output_summary, engine="xlsxwriter") as writer:
+            df_date_totals.to_excel(writer, sheet_name='Date Totals', index=False)
+            df_date_gateway.to_excel(writer, sheet_name='Date Gateway', index=False)
+            df_date_category.to_excel(writer, sheet_name='Date Category', index=False)
             df_combined_grouped.to_excel(writer, sheet_name='Combined Summary', index=False)
             df_gateway_totals.to_excel(writer, sheet_name='Gateway Totals', index=False)
             df_category_totals.to_excel(writer, sheet_name='Category Totals', index=False)
+            safe_set_column_widths(writer, 'Date Totals', df_date_totals)
+            safe_set_column_widths(writer, 'Date Gateway', df_date_gateway)
+            safe_set_column_widths(writer, 'Date Category', df_date_category)
+            safe_set_column_widths(writer, 'Combined Summary', df_combined_grouped)
+            safe_set_column_widths(writer, 'Gateway Totals', df_gateway_totals)
+            safe_set_column_widths(writer, 'Category Totals', df_category_totals)
         
         st.download_button(
             label="Download Combined Summary Report",

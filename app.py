@@ -15,10 +15,10 @@ def load_excel_file(file_content, parse_dates_cols):
     return pd.read_excel(io.BytesIO(file_content), parse_dates=parse_dates_cols)
 
 st.set_page_config(page_title="Payment Gateway Comparator", layout="wide")
-st.title("ZEN vs BridgerPay vs Coins Buy vs Confirmo vs PayProcc Comparator")
+st.title("ZEN vs BridgerPay vs Coins Buy vs Confirmo vs PayProcc vs PayPal Comparator")
 
-# Create six tabs: ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, and Summary
-tab_zen, tab_bp, tab_coins, tab_confirmo, tab_payprocc, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "PayProcc", "Summary"])
+# Create seven tabs: ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, PayPal, and Summary
+tab_zen, tab_bp, tab_coins, tab_confirmo, tab_payprocc, tab_paypal, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "PayProcc", "PayPal", "Summary"])
 
 # Futures filtering function - checks if "Futures" is in the Plan Type name
 def is_futures_plan(plan_type):
@@ -87,7 +87,7 @@ def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction I
     st.success(f"{gateway_name} Order-list rows selected from shared file: {len(df_ord)} clean entries")
     return df_ord
 
-# Shared Order-list upload for ZEN, BridgerPay, Coins Buy, and Confirmo
+# Shared Order-list upload for ZEN, BridgerPay, Coins Buy, Confirmo, and PayPal
 st.sidebar.header("Shared Order-list")
 shared_order_file = st.sidebar.file_uploader(
     "Upload Combined Order-list File",
@@ -106,7 +106,7 @@ if shared_order_file:
             use_container_width=True
         )
 else:
-    st.sidebar.info("Upload one combined Order-list file here. ZEN, BridgerPay, Coins Buy, and Confirmo tabs will use it automatically.")
+    st.sidebar.info("Upload one combined Order-list file here. ZEN, BridgerPay, Coins Buy, Confirmo, and PayPal tabs will use it automatically.")
 
 # --- ZEN Tab ---
 with tab_zen:
@@ -712,6 +712,182 @@ with tab_confirmo:
         st.info("Please upload the Confirmo file and the shared combined Order-list file from the sidebar.")
 
 
+
+# --- PayPal Tab ---
+with tab_paypal:
+    st.header("PayPal vs Order-list")
+    paypal_file = st.file_uploader("Upload PayPal Report File", key="paypal_file", type=["csv", "xlsx"])
+
+    if paypal_file and df_order_all is not None:
+        st.subheader("Step 1: Load PayPal File")
+
+        # Load PayPal file
+        if paypal_file.name.lower().endswith('.csv'):
+            df_paypal = pd.read_csv(paypal_file, encoding="utf-8-sig")
+        else:
+            df_paypal = pd.read_excel(paypal_file)
+
+        required_paypal_cols = ["Date", "Time", "Type", "Status", "Currency", "Gross", "Transaction ID"]
+        missing_paypal_cols = [col for col in required_paypal_cols if col not in df_paypal.columns]
+        if missing_paypal_cols:
+            st.error(f"PayPal file must contain these columns: {', '.join(missing_paypal_cols)}. Found columns: {list(df_paypal.columns)}")
+            st.stop()
+
+        # PayPal report time is UTC-7. Build one datetime column from Date + Time.
+        df_paypal["paypal_datetime_utc_minus_7"] = pd.to_datetime(
+            df_paypal["Date"].astype(str).str.strip() + " " + df_paypal["Time"].astype(str).str.strip(),
+            dayfirst=True,
+            errors="coerce"
+        )
+
+        # Clean Gross amount and use Gross for revenue, as requested.
+        df_paypal["Gross Amount"] = pd.to_numeric(
+            df_paypal["Gross"].astype(str).str.replace(",", "", regex=False).str.replace("$", "", regex=False).str.strip(),
+            errors="coerce"
+        )
+
+        # Filter only successful payment rows
+        initial_paypal_count = len(df_paypal)
+        df_paypal = df_paypal[
+            (df_paypal["Type"].astype(str).str.strip().str.lower() == "express checkout payment") &
+            (df_paypal["Status"].astype(str).str.strip().str.lower() == "completed") &
+            (df_paypal["Currency"].astype(str).str.strip().str.upper() == "USD")
+        ].copy()
+        st.info(f"Filtered {initial_paypal_count} → {len(df_paypal)} transactions (Type=Express Checkout Payment, Status=Completed, Currency=USD)")
+
+        invalid_paypal_datetime = df_paypal["paypal_datetime_utc_minus_7"].isna()
+        if invalid_paypal_datetime.any():
+            st.warning(f"Removed {invalid_paypal_datetime.sum()} rows with invalid PayPal Date/Time")
+            df_paypal = df_paypal[~invalid_paypal_datetime].copy()
+
+        invalid_gross = df_paypal["Gross Amount"].isna()
+        if invalid_gross.any():
+            st.warning(f"Removed {invalid_gross.sum()} rows with invalid Gross amount")
+            df_paypal = df_paypal[~invalid_gross].copy()
+
+        # Remove duplicate PayPal transaction IDs
+        duplicates_paypal = df_paypal.duplicated(subset=["Transaction ID"], keep=False)
+        if duplicates_paypal.any():
+            st.warning(f"Removed {duplicates_paypal.sum()} duplicate PayPal transactions")
+            df_paypal = df_paypal.drop_duplicates(subset=["Transaction ID"], keep="first")
+        st.info(f"PayPal PSP: {len(df_paypal)} clean transactions")
+
+        if df_paypal.empty:
+            st.warning("No PayPal successful transactions found after filtering.")
+            st.stop()
+
+        # Date range selection based on PayPal report date/time (UTC-7)
+        min_date_paypal = df_paypal["paypal_datetime_utc_minus_7"].dt.date.min()
+        max_date_paypal = df_paypal["paypal_datetime_utc_minus_7"].dt.date.max()
+        col1_ppal, col2_ppal = st.columns(2)
+        with col1_ppal:
+            start_date_paypal = st.date_input("Start date", value=min_date_paypal, key="paypal_start_date")
+        with col2_ppal:
+            end_date_paypal = st.date_input("End date", value=max_date_paypal, key="paypal_end_date")
+
+        # Filter PayPal report by selected UTC-7 date window
+        start_paypal = datetime.combine(start_date_paypal, time(0, 0, 0))
+        end_paypal = datetime.combine(end_date_paypal, time(23, 59, 59))
+        df_paypal = df_paypal[
+            (df_paypal["paypal_datetime_utc_minus_7"] >= start_paypal) &
+            (df_paypal["paypal_datetime_utc_minus_7"] <= end_paypal)
+        ].copy()
+
+        # Use the shared combined Order-list and filter only PayPal rows.
+        # For PayPal, PayPal Transaction ID matches Order-list Tracking ID.
+        st.subheader("Step 2: Process PayPal Order List from Shared File")
+        df_ord_paypal = get_order_list_for_gateway(df_order_all, "PayPal", id_col="Tracking ID")
+
+        # PayPal report is UTC-7. Order-list timestamp is ahead by 10 hours in the current reports.
+        start_ord_paypal = start_paypal + timedelta(hours=10)
+        end_ord_paypal = end_paypal + timedelta(hours=10)
+        df_ord_paypal = df_ord_paypal[
+            (df_ord_paypal["Updated At"] >= start_ord_paypal) &
+            (df_ord_paypal["Updated At"] <= end_ord_paypal)
+        ].copy()
+
+        # Match PayPal Transaction ID with Order-list Tracking ID
+        df_ord_paypal_sel = df_ord_paypal[["Tracking ID", "Plan Type", "Grand Total"]].copy()
+        df_merged_paypal = df_paypal.merge(
+            df_ord_paypal_sel,
+            left_on="Transaction ID",
+            right_on="Tracking ID",
+            how="inner"
+        )
+
+        # Amount mismatch check: PayPal Gross vs Order-list Grand Total
+        mask_amt_paypal = df_merged_paypal["Gross Amount"].round(6) != pd.to_numeric(df_merged_paypal["Grand Total"], errors="coerce").round(6)
+        if mask_amt_paypal.any():
+            st.warning(f"Found {mask_amt_paypal.sum()} amount mismatches in PayPal:")
+            st.dataframe(df_merged_paypal.loc[mask_amt_paypal, ["Transaction ID", "Gross Amount", "Grand Total", "Currency"]])
+        else:
+            st.success("No amount mismatches")
+
+        # Handle unmatched PSP entries (add to CFD)
+        unmatched_paypal_psp = df_paypal[~df_paypal["Transaction ID"].isin(df_merged_paypal["Transaction ID"])]
+        if len(unmatched_paypal_psp) > 0:
+            st.warning(f"Found {len(unmatched_paypal_psp)} unmatched PayPal PSP entries - adding to CFD:")
+            st.dataframe(unmatched_paypal_psp[["Transaction ID", "paypal_datetime_utc_minus_7", "Gross Amount", "Currency"]])
+            unmatched_paypal_psp = unmatched_paypal_psp.copy()
+            unmatched_paypal_psp["Plan Type"] = "CFD (Unmatched PSP)"
+            unmatched_paypal_psp["Grand Total"] = unmatched_paypal_psp["Gross Amount"]
+            df_merged_paypal = pd.concat([df_merged_paypal, unmatched_paypal_psp], ignore_index=True)
+
+        st.info(f"Final total: {len(df_merged_paypal)} transactions included in export")
+
+        # Split into Futures vs CFD
+        df_futures_paypal = df_merged_paypal[df_merged_paypal["Plan Type"].apply(is_futures_plan)].copy()
+        df_cfd_paypal = df_merged_paypal[~df_merged_paypal["Plan Type"].apply(is_futures_plan)].copy()
+
+        # Sort by PayPal datetime before export
+        df_futures_paypal = df_futures_paypal.sort_values("paypal_datetime_utc_minus_7")
+        df_cfd_paypal = df_cfd_paypal.sort_values("paypal_datetime_utc_minus_7")
+
+        # Revenue summary in GMT+6. PayPal report is UTC-7, so add 13 hours to convert to GMT+6.
+        df_futures_paypal["Date"] = (df_futures_paypal["paypal_datetime_utc_minus_7"] + pd.Timedelta(hours=13)).dt.date
+        df_cfd_paypal["Date"] = (df_cfd_paypal["paypal_datetime_utc_minus_7"] + pd.Timedelta(hours=13)).dt.date
+        df_futures_paypal["Category"] = "Futures"
+        df_cfd_paypal["Category"] = "CFD"
+
+        df_summary_paypal = pd.concat([
+            df_cfd_paypal[["Date", "Category", "Gross Amount"]],
+            df_futures_paypal[["Date", "Category", "Gross Amount"]]
+        ])
+        df_summary_paypal = df_summary_paypal.groupby(["Date", "Category"], as_index=False).agg(
+            Revenue=("Gross Amount", "sum"),
+            Transaction_Count=("Gross Amount", "count")
+        ).sort_values("Date")
+
+        st.subheader("Datewise Revenue Summary (GMT+6)")
+        display_summary_table(df_summary_paypal)
+
+        # Excel output for PayPal
+        output_paypal = io.BytesIO()
+        with pd.ExcelWriter(output_paypal, engine="xlsxwriter") as writer:
+            cols_paypal = df_paypal.columns.tolist()
+            if "Gross Amount" not in cols_paypal:
+                cols_paypal.append("Gross Amount")
+            if "paypal_datetime_utc_minus_7" not in cols_paypal:
+                cols_paypal.append("paypal_datetime_utc_minus_7")
+            df_cfd_paypal[cols_paypal].to_excel(writer, sheet_name='CFD', index=False)
+            df_futures_paypal[cols_paypal].to_excel(writer, sheet_name='Futures', index=False)
+            df_summary_paypal.to_excel(writer, sheet_name='Revenue Summary', index=False)
+            for sheet_name, df_out in [('CFD', df_cfd_paypal[cols_paypal]), ('Futures', df_futures_paypal[cols_paypal]), ('Revenue Summary', df_summary_paypal)]:
+                safe_set_column_widths(writer, sheet_name, df_out)
+
+        st.download_button(
+            label="Download PayPal Comparison Report",
+            data=output_paypal.getvalue(),
+            file_name="paypal_order_comparison.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        # Store in session state for Summary tab
+        st.session_state['paypal_summary'] = df_summary_paypal.copy()
+        st.session_state['paypal_summary']['Gateway'] = 'PayPal'
+    else:
+        st.info("Please upload the PayPal report file and the shared combined Order-list file from the sidebar.")
+
 # --- PayProcc Tab ---
 with tab_payprocc:
     st.header("PayProcc Revenue Report")
@@ -874,6 +1050,10 @@ with tab_summary:
     if 'payprocc_summary' in st.session_state:
         summaries.append(st.session_state['payprocc_summary'])
         gateways_processed.append("PayProcc")
+
+    if 'paypal_summary' in st.session_state:
+        summaries.append(st.session_state['paypal_summary'])
+        gateways_processed.append("PayPal")
     
     if summaries:
         # Combine all summaries
@@ -974,9 +1154,9 @@ with tab_summary:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.info("Please process at least one gateway (ZEN, BridgerPay, Coins Buy, Confirmo, or PayProcc) to see the combined summary.")
+        st.info("Please process at least one gateway (ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, or PayPal) to see the combined summary.")
         st.write("**Instructions:**")
-        st.write("1. Go to any gateway tab (ZEN, BridgerPay, Coins Buy, Confirmo, or PayProcc)")
+        st.write("1. Go to any gateway tab (ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, or PayPal)")
         st.write("2. Upload the required files and generate the report")
         st.write("3. Return to this Summary tab to see the combined data")
 

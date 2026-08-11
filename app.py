@@ -17,6 +17,34 @@ def load_excel_file(file_content, parse_dates_cols):
 st.set_page_config(page_title="Payment Gateway Comparator", layout="wide")
 st.title("ZEN vs BridgerPay vs Coins Buy vs Confirmo vs Binance Pay vs PayProcc Comparator (GMT+3)")
 
+# One global reporting period for every gateway and the combined summary.
+today_gmt3 = (datetime.utcnow() + timedelta(hours=3)).date()
+st.subheader("Global Reporting Period (GMT+3)")
+filter_col1, filter_col2 = st.columns(2)
+with filter_col1:
+    global_start_date = st.date_input(
+        "Start Date",
+        value=today_gmt3,
+        key="global_start_date",
+    )
+with filter_col2:
+    global_end_date = st.date_input(
+        "End Date",
+        value=today_gmt3,
+        key="global_end_date",
+    )
+
+if global_start_date > global_end_date:
+    st.error("Start Date cannot be after End Date.")
+    st.stop()
+
+global_start_report = datetime.combine(global_start_date, time(0, 0, 0))
+global_end_report = datetime.combine(global_end_date, time(23, 59, 59, 999999))
+st.caption(
+    f"Applied to all gateways and Summary: {global_start_date:%d %b %Y} to "
+    f"{global_end_date:%d %b %Y} (GMT+3)"
+)
+
 # Create seven tabs: ZEN, BridgerPay, Coins Buy, Confirmo, Binance Pay, PayProcc, and Summary
 tab_zen, tab_bp, tab_coins, tab_confirmo, tab_binance, tab_payprocc, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "Binance Pay", "PayProcc", "Summary"])
 
@@ -89,7 +117,7 @@ def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction I
 
 # Shared Order-list upload for ZEN, BridgerPay, Coins Buy, and Confirmo
 st.sidebar.header("Shared Order-list")
-st.sidebar.caption("Reporting timezone: GMT+3")
+st.sidebar.caption("Reporting timezone: GMT+3 | Date period is selected above the tabs")
 shared_order_file = st.sidebar.file_uploader(
     "Upload Combined Order-list File",
     key="shared_order_file",
@@ -134,23 +162,10 @@ with tab_zen:
         st.subheader("Step 2: Process ZEN Order List from Shared File")
         df_ord = get_order_list_for_gateway(df_order_all, "Zen Pay", id_col="Transaction ID")
 
-        # Date range selection based on ZEN data
-        min_date = df_zen['Report Datetime (GMT+3)'].dt.date.min()
-        max_date = df_zen['Report Datetime (GMT+3)'].dt.date.max()
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("Start date", value=min_date)
-        with col2:
-            end_date = st.date_input("End date", value=max_date)
-
-        # Selected reporting window is GMT+3. Order-list timestamps are already GMT+3.
-        start_report = datetime.combine(start_date, time(0, 0, 0))
-        end_report = datetime.combine(end_date, time(23, 59, 59))
-
-        # Filter ZEN by converted GMT+3 timestamp
+        # Apply the global GMT+3 reporting period.
         df_zen_filt = df_zen[
-            (df_zen["Report Datetime (GMT+3)"] >= start_report) &
-            (df_zen["Report Datetime (GMT+3)"] <= end_report) &
+            (df_zen["Report Datetime (GMT+3)"] >= global_start_report) &
+            (df_zen["Report Datetime (GMT+3)"] <= global_end_report) &
             (df_zen["payment_channel"].str.lower() != "card") &
             (df_zen["transaction_type"].str.lower() == "purchase")
         ].copy()
@@ -178,8 +193,8 @@ with tab_zen:
 
         # Filter Order-list and select needed columns
         df_ord_filt = df_ord[
-            (df_ord["Updated At"] >= start_report) &
-            (df_ord["Updated At"] <= end_report)
+            (df_ord["Updated At"] >= global_start_report) &
+            (df_ord["Updated At"] <= global_end_report)
         ][["Transaction ID", "Plan Type", "Grand Total"]].copy()
 
         # Merge on transaction ID
@@ -301,20 +316,10 @@ with tab_bp:
             df_bp = df_bp.drop_duplicates(subset=["merchantOrderId"], keep="first")
         st.info(f"BridgerPay PSP: {len(df_bp)} clean transactions")
 
-        # Date range selection based on BridgerPay processing_date
-        min_date_bp = df_bp['Report Datetime (GMT+3)'].dt.date.min()
-        max_date_bp = df_bp['Report Datetime (GMT+3)'].dt.date.max()
-        col1_bp, col2_bp = st.columns(2)
-        with col1_bp:
-            start_date_bp = st.date_input("Start date", value=min_date_bp, key="bp_start_date")
-        with col2_bp:
-            end_date_bp = st.date_input("End date", value=max_date_bp, key="bp_end_date")
-        # Selected reporting window is GMT+3.
-        start_report_bp = datetime.combine(start_date_bp, time(0, 0, 0))
-        end_report_bp = datetime.combine(end_date_bp, time(23, 59, 59))
+        # Apply the global GMT+3 reporting period.
         df_bp = df_bp[
-            (df_bp['Report Datetime (GMT+3)'] >= start_report_bp) &
-            (df_bp['Report Datetime (GMT+3)'] <= end_report_bp)
+            (df_bp['Report Datetime (GMT+3)'] >= global_start_report) &
+            (df_bp['Report Datetime (GMT+3)'] <= global_end_report)
         ].copy()
 
         # Sort oldest→newest
@@ -325,7 +330,7 @@ with tab_bp:
         df_ord2 = get_order_list_for_gateway(df_order_all, "Bridger Pay", id_col="Transaction ID")
         
         # Order-list timestamps are already GMT+3.
-        df_ord2 = df_ord2[(df_ord2["Updated At"] >= start_report_bp) & (df_ord2["Updated At"] <= end_report_bp)].copy()
+        df_ord2 = df_ord2[(df_ord2["Updated At"] >= global_start_report) & (df_ord2["Updated At"] <= global_end_report)].copy()
 
         # Merge and amount reconciliation for BP
         df_ord2_sel = df_ord2[["Transaction ID", "Plan Type", "Grand Total"]].copy()
@@ -438,21 +443,10 @@ with tab_coins:
             st.dataframe(duplicate_coins_data[["Tracking ID", "Created", "Amount", "Rate", "calculated_amount"]])
         st.info(f"Coins Buy PSP: {len(df_coins)} total transactions")
 
-        # Date range selection based on Coins Buy Created date
-        min_date_coins = df_coins['Report Datetime (GMT+3)'].dt.date.min()
-        max_date_coins = df_coins['Report Datetime (GMT+3)'].dt.date.max()
-        col1_coins, col2_coins = st.columns(2)
-        with col1_coins:
-            start_date_coins = st.date_input("Start date", value=min_date_coins, key="coins_start_date")
-        with col2_coins:
-            end_date_coins = st.date_input("End date", value=max_date_coins, key="coins_end_date")
-        
-        # Selected reporting window is GMT+3.
-        start_report_coins = datetime.combine(start_date_coins, time(0, 0, 0))
-        end_report_coins = datetime.combine(end_date_coins, time(23, 59, 59))
+        # Apply the global GMT+3 reporting period.
         df_coins = df_coins[
-            (df_coins['Report Datetime (GMT+3)'] >= start_report_coins) &
-            (df_coins['Report Datetime (GMT+3)'] <= end_report_coins)
+            (df_coins['Report Datetime (GMT+3)'] >= global_start_report) &
+            (df_coins['Report Datetime (GMT+3)'] <= global_end_report)
         ].copy()
 
         # Sort oldest→newest
@@ -466,7 +460,7 @@ with tab_coins:
         df_ord3 = get_order_list_for_gateway(df_order_all, "Crypto", id_col="Tracking ID")
 
         # Order-list timestamps are already GMT+3.
-        df_ord3 = df_ord3[(df_ord3["Updated At"] >= start_report_coins) & (df_ord3["Updated At"] <= end_report_coins)].copy()
+        df_ord3 = df_ord3[(df_ord3["Updated At"] >= global_start_report) & (df_ord3["Updated At"] <= global_end_report)].copy()
 
         # Handle blank Tracking ID and match
         mask_blank_tracking = df_coins["Tracking ID"].isna() | (df_coins["Tracking ID"].astype(str).str.strip() == "")
@@ -607,21 +601,10 @@ with tab_confirmo:
             df_confirmo = df_confirmo.drop_duplicates(subset=["ID"], keep="first")
         st.info(f"Confirmo PSP: {len(df_confirmo)} clean transactions")
 
-        # Date range selection
-        min_date_confirmo = df_confirmo["Report Datetime (GMT+3)"].dt.date.min()
-        max_date_confirmo = df_confirmo["Report Datetime (GMT+3)"].dt.date.max()
-        col1_conf, col2_conf = st.columns(2)
-        with col1_conf:
-            start_date_confirmo = st.date_input("Start date", value=min_date_confirmo, key="confirmo_start_date")
-        with col2_conf:
-            end_date_confirmo = st.date_input("End date", value=max_date_confirmo, key="confirmo_end_date")
-
-        # Selected reporting window is GMT+3.
-        start_report_conf = datetime.combine(start_date_confirmo, time(0, 0, 0))
-        end_report_conf = datetime.combine(end_date_confirmo, time(23, 59, 59))
+        # Apply the global GMT+3 reporting period.
         df_confirmo = df_confirmo[
-            (df_confirmo["Report Datetime (GMT+3)"] >= start_report_conf) &
-            (df_confirmo["Report Datetime (GMT+3)"] <= end_report_conf)
+            (df_confirmo["Report Datetime (GMT+3)"] >= global_start_report) &
+            (df_confirmo["Report Datetime (GMT+3)"] <= global_end_report)
         ].copy()
 
         # Sort oldest→newest
@@ -632,7 +615,7 @@ with tab_confirmo:
         df_ord_conf = get_order_list_for_gateway(df_order_all, "Confirmo", id_col="Transaction ID")
 
         # Order-list timestamps are already GMT+3.
-        df_ord_conf = df_ord_conf[(df_ord_conf["Updated At"] >= start_report_conf) & (df_ord_conf["Updated At"] <= end_report_conf)].copy()
+        df_ord_conf = df_ord_conf[(df_ord_conf["Updated At"] >= global_start_report) & (df_ord_conf["Updated At"] <= global_end_report)].copy()
 
         # Match Confirmo ID with Transaction ID using previous logic
         df_ord_conf_sel = df_ord_conf[["Transaction ID", "Plan Type", "Grand Total"]].copy()
@@ -793,30 +776,15 @@ with tab_binance:
             st.warning("No PAID Binance transactions found after filtering.")
             st.stop()
 
-        # Select dates in the reporting timezone GMT+3.
-        st.subheader("Step 3: Select Date Range (GMT+3)")
-        min_date_binance = df_binance["Report Datetime (GMT+3)"].dt.date.min()
-        max_date_binance = df_binance["Report Datetime (GMT+3)"].dt.date.max()
-        col1_binance, col2_binance = st.columns(2)
-        with col1_binance:
-            start_date_binance = st.date_input(
-                "Start date", value=min_date_binance, key="binance_start_date"
-            )
-        with col2_binance:
-            end_date_binance = st.date_input(
-                "End date", value=max_date_binance, key="binance_end_date"
-            )
-
-        start_dt_binance = datetime.combine(start_date_binance, time(0, 0, 0))
-        end_dt_binance = datetime.combine(end_date_binance, time(23, 59, 59))
+        # Apply the global GMT+3 reporting period.
         df_binance = df_binance[
-            (df_binance["Report Datetime (GMT+3)"] >= start_dt_binance) &
-            (df_binance["Report Datetime (GMT+3)"] <= end_dt_binance)
+            (df_binance["Report Datetime (GMT+3)"] >= global_start_report) &
+            (df_binance["Report Datetime (GMT+3)"] <= global_end_report)
         ].copy()
-        st.info(f"Filtered to {len(df_binance)} Binance transactions in selected GMT+3 date range")
+        st.info(f"Filtered to {len(df_binance)} Binance transactions in the global GMT+3 period")
 
         # Split CFD / Futures using Binance Product Description, same direct-file classification approach as PayProcc.
-        st.subheader("Step 4: Split by Category")
+        st.subheader("Step 3: Split by Category")
         df_binance["is_futures"] = df_binance["Product Description"].apply(
             lambda x: "futures" in str(x).lower() if pd.notna(x) else False
         )
@@ -832,7 +800,7 @@ with tab_binance:
         df_cfd_binance = df_cfd_binance.sort_values("Report Datetime (GMT+3)")
 
         # Revenue summary in GMT+3.
-        st.subheader("Step 5: Revenue Summary (GMT+3)")
+        st.subheader("Step 4: Revenue Summary (GMT+3)")
         df_futures_binance["Date"] = df_futures_binance["Report Datetime (GMT+3)"].dt.date
         df_cfd_binance["Date"] = df_cfd_binance["Report Datetime (GMT+3)"].dt.date
         df_futures_binance["Category"] = "Futures"
@@ -853,7 +821,7 @@ with tab_binance:
         display_summary_table(df_summary_binance)
 
         # Excel output for Binance Pay.
-        st.subheader("Step 6: Download Report")
+        st.subheader("Step 5: Download Report")
         output_binance = io.BytesIO()
         with pd.ExcelWriter(output_binance, engine="xlsxwriter") as writer:
             df_cfd_binance.to_excel(writer, sheet_name="CFD", index=False)
@@ -928,26 +896,15 @@ with tab_payprocc:
             df_payprocc = df_payprocc.drop_duplicates(subset=["Payment Public ID"], keep="first")
         st.info(f"PayProcc: {len(df_payprocc)} clean transactions after duplicate removal")
         
-        # Date range selection
-        st.subheader("Step 3: Select Date Range")
-        min_date_pp = df_payprocc['Report Datetime (GMT+3)'].dt.date.min()
-        max_date_pp = df_payprocc['Report Datetime (GMT+3)'].dt.date.max()
-        col1_pp, col2_pp = st.columns(2)
-        with col1_pp:
-            start_date_pp = st.date_input("Start date", value=min_date_pp, key="pp_start_date")
-        with col2_pp:
-            end_date_pp = st.date_input("End date", value=max_date_pp, key="pp_end_date")
-        
-        # Filter by selected GMT+3 reporting date range.
-        start_dt_pp = datetime.combine(start_date_pp, time(0, 0, 0))
-        end_dt_pp = datetime.combine(end_date_pp, time(23, 59, 59))
-        df_payprocc = df_payprocc[(df_payprocc['Report Datetime (GMT+3)'] >= start_dt_pp) & 
-                                   (df_payprocc['Report Datetime (GMT+3)'] <= end_dt_pp)].copy()
-        
-        st.info(f"Filtered to {len(df_payprocc)} transactions in selected date range")
+        # Apply the global GMT+3 reporting period. PayProcc input is already GMT+3.
+        df_payprocc = df_payprocc[
+            (df_payprocc['Report Datetime (GMT+3)'] >= global_start_report) &
+            (df_payprocc['Report Datetime (GMT+3)'] <= global_end_report)
+        ].copy()
+        st.info(f"Filtered to {len(df_payprocc)} transactions in the global GMT+3 period")
         
         # Calculate final amount
-        st.subheader("Step 4: Calculate Final Amount")
+        st.subheader("Step 3: Calculate Final Amount")
         # If Exchange Rate is empty, use Amount directly (already in USD)
         # If Exchange Rate has value, calculate Amount / Exchange Rate
         df_payprocc["Final Amount"] = df_payprocc.apply(
@@ -958,7 +915,7 @@ with tab_payprocc:
         st.success(f"Calculated Final Amount (USD conversion applied)")
         
         # Split into Futures and CFD based on Description
-        st.subheader("Step 5: Split by Category")
+        st.subheader("Step 4: Split by Category")
         
         # Check if Description contains "futures" (case-insensitive)
         df_payprocc["is_futures"] = df_payprocc["Description"].apply(
@@ -975,7 +932,7 @@ with tab_payprocc:
         df_cfd_pp = df_cfd_pp.sort_values("Transaction Date")
         
         # Revenue summary in GMT+3
-        st.subheader("Step 6: Revenue Summary (GMT+3)")
+        st.subheader("Step 5: Revenue Summary (GMT+3)")
         df_futures_pp["Date"] = df_futures_pp["Report Datetime (GMT+3)"].dt.date
         df_cfd_pp["Date"] = df_cfd_pp["Report Datetime (GMT+3)"].dt.date
         df_futures_pp["Category"] = "Futures"
@@ -991,7 +948,7 @@ with tab_payprocc:
         display_summary_table(df_summary_pp)
         
         # Excel output for PayProcc
-        st.subheader("Step 7: Download Report")
+        st.subheader("Step 6: Download Report")
         output_pp = io.BytesIO()
         with pd.ExcelWriter(output_pp, engine="xlsxwriter") as writer:
             # Write sheets
@@ -1020,6 +977,10 @@ with tab_payprocc:
 with tab_summary:
     st.header("Combined Gateway Revenue Summary")
     st.write("This tab shows the combined revenue summary from all available gateways.")
+    st.info(
+        f"Reporting Period: {global_start_date:%d %b %Y} to "
+        f"{global_end_date:%d %b %Y} (GMT+3)"
+    )
     
     # Collect summaries from session state
     summaries = []

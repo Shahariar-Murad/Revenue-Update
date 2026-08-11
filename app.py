@@ -15,10 +15,10 @@ def load_excel_file(file_content, parse_dates_cols):
     return pd.read_excel(io.BytesIO(file_content), parse_dates=parse_dates_cols)
 
 st.set_page_config(page_title="Payment Gateway Comparator", layout="wide")
-st.title("ZEN vs BridgerPay vs Coins Buy vs Confirmo vs PayProcc vs PayPal Comparator")
+st.title("ZEN vs BridgerPay vs Coins Buy vs Confirmo vs Binance Pay vs PayProcc Comparator (GMT+3)")
 
-# Create seven tabs: ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, PayPal, and Summary
-tab_zen, tab_bp, tab_coins, tab_confirmo, tab_payprocc, tab_paypal, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "PayProcc", "PayPal", "Summary"])
+# Create seven tabs: ZEN, BridgerPay, Coins Buy, Confirmo, Binance Pay, PayProcc, and Summary
+tab_zen, tab_bp, tab_coins, tab_confirmo, tab_binance, tab_payprocc, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "Binance Pay", "PayProcc", "Summary"])
 
 # Futures filtering function - checks if "Futures" is in the Plan Type name
 def is_futures_plan(plan_type):
@@ -87,8 +87,9 @@ def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction I
     st.success(f"{gateway_name} Order-list rows selected from shared file: {len(df_ord)} clean entries")
     return df_ord
 
-# Shared Order-list upload for ZEN, BridgerPay, Coins Buy, Confirmo, and PayPal
+# Shared Order-list upload for ZEN, BridgerPay, Coins Buy, and Confirmo
 st.sidebar.header("Shared Order-list")
+st.sidebar.caption("Reporting timezone: GMT+3")
 shared_order_file = st.sidebar.file_uploader(
     "Upload Combined Order-list File",
     key="shared_order_file",
@@ -106,7 +107,7 @@ if shared_order_file:
             use_container_width=True
         )
 else:
-    st.sidebar.info("Upload one combined Order-list file here. ZEN, BridgerPay, Coins Buy, Confirmo, and PayPal tabs will use it automatically.")
+    st.sidebar.info("Upload one combined Order-list file here. ZEN, BridgerPay, Coins Buy, and Confirmo tabs will use it automatically.")
 
 # --- ZEN Tab ---
 with tab_zen:
@@ -121,6 +122,8 @@ with tab_zen:
             else:
                 df_zen = load_excel_file(zen_file.read(), ["accepted_at"])
             df_zen["accepted_at"] = df_zen["accepted_at"].dt.tz_localize(None)
+            # ZEN timestamps are GMT+0; convert to reporting timezone GMT+3.
+            df_zen["Report Datetime (GMT+3)"] = df_zen["accepted_at"] + pd.Timedelta(hours=3)
 
         # Validate gateway columns
         if not (df_zen.get("Gateway", pd.Series()).eq("Zen Pay").all()):
@@ -132,24 +135,22 @@ with tab_zen:
         df_ord = get_order_list_for_gateway(df_order_all, "Zen Pay", id_col="Transaction ID")
 
         # Date range selection based on ZEN data
-        min_date = df_zen['accepted_at'].dt.date.min()
-        max_date = df_zen['accepted_at'].dt.date.max()
+        min_date = df_zen['Report Datetime (GMT+3)'].dt.date.min()
+        max_date = df_zen['Report Datetime (GMT+3)'].dt.date.max()
         col1, col2 = st.columns(2)
         with col1:
             start_date = st.date_input("Start date", value=min_date)
         with col2:
             end_date = st.date_input("End date", value=max_date)
 
-        # Define head/tail windows (GMT+2 offset for Order List)
-        start_zen = datetime.combine(start_date, time(18, 0, 0))
-        end_zen = datetime.combine(end_date, time(17, 59, 59))
-        start_ord = datetime.combine(start_date, time(20, 0, 0))
-        end_ord = datetime.combine(end_date, time(19, 59, 59))
+        # Selected reporting window is GMT+3. Order-list timestamps are already GMT+3.
+        start_report = datetime.combine(start_date, time(0, 0, 0))
+        end_report = datetime.combine(end_date, time(23, 59, 59))
 
-        # Filter ZEN
+        # Filter ZEN by converted GMT+3 timestamp
         df_zen_filt = df_zen[
-            (df_zen["accepted_at"] >= start_zen) &
-            (df_zen["accepted_at"] <= end_zen) &
+            (df_zen["Report Datetime (GMT+3)"] >= start_report) &
+            (df_zen["Report Datetime (GMT+3)"] <= end_report) &
             (df_zen["payment_channel"].str.lower() != "card") &
             (df_zen["transaction_type"].str.lower() == "purchase")
         ].copy()
@@ -177,8 +178,8 @@ with tab_zen:
 
         # Filter Order-list and select needed columns
         df_ord_filt = df_ord[
-            (df_ord["Updated At"] >= start_ord) &
-            (df_ord["Updated At"] <= end_ord)
+            (df_ord["Updated At"] >= start_report) &
+            (df_ord["Updated At"] <= end_report)
         ][["Transaction ID", "Plan Type", "Grand Total"]].copy()
 
         # Merge on transaction ID
@@ -220,9 +221,9 @@ with tab_zen:
         df_futures = df_futures.sort_values("accepted_at")
         df_cfd = df_cfd.sort_values("accepted_at")
 
-        # Revenue summary (GMT+6 shift on accepted_at)
-        df_futures["Date"] = (df_futures["accepted_at"] + pd.Timedelta(hours=6)).dt.date
-        df_cfd["Date"] = (df_cfd["accepted_at"] + pd.Timedelta(hours=6)).dt.date
+        # Revenue summary in GMT+3
+        df_futures["Date"] = df_futures["Report Datetime (GMT+3)"].dt.date
+        df_cfd["Date"] = df_cfd["Report Datetime (GMT+3)"].dt.date
         df_futures["Category"] = "Futures"
         df_cfd["Category"] = "CFD"
         df_summary = pd.concat([
@@ -231,7 +232,7 @@ with tab_zen:
         ])
         df_summary = df_summary.groupby(["Date", "Category"], as_index=False).agg(Revenue=("transaction_amount", "sum"), Transaction_Count=("transaction_amount", "count")).sort_values("Date")
 
-        st.subheader("Datewise Revenue Summary (GMT+6)")
+        st.subheader("Datewise Revenue Summary (GMT+3)")
         display_summary_table(df_summary)
 
         # Excel output for ZEN
@@ -275,6 +276,8 @@ with tab_bp:
             df_bp["processing_date"] = pd.to_datetime(df_bp["processing_date"], format='mixed', utc=True)
             # Remove timezone info to keep as naive datetime
             df_bp["processing_date"] = df_bp["processing_date"].dt.tz_localize(None)
+            # BridgerPay timestamps are GMT+0; convert to reporting timezone GMT+3.
+            df_bp["Report Datetime (GMT+3)"] = df_bp["processing_date"] + pd.Timedelta(hours=3)
         else:
             st.error(f"BridgerPay file must contain 'processing_date' column. Found columns: {list(df_bp.columns)}")
             st.stop()
@@ -299,21 +302,20 @@ with tab_bp:
         st.info(f"BridgerPay PSP: {len(df_bp)} clean transactions")
 
         # Date range selection based on BridgerPay processing_date
-        min_date_bp = df_bp['processing_date'].dt.date.min()
-        max_date_bp = df_bp['processing_date'].dt.date.max()
+        min_date_bp = df_bp['Report Datetime (GMT+3)'].dt.date.min()
+        max_date_bp = df_bp['Report Datetime (GMT+3)'].dt.date.max()
         col1_bp, col2_bp = st.columns(2)
         with col1_bp:
             start_date_bp = st.date_input("Start date", value=min_date_bp, key="bp_start_date")
         with col2_bp:
             end_date_bp = st.date_input("End date", value=max_date_bp, key="bp_end_date")
-        # Filter BridgerPay data for selected window (00:00 to 23:59:59)
-        start_proc = datetime.combine(start_date_bp, time(0, 0, 0))
-        end_proc   = datetime.combine(end_date_bp,   time(23, 59, 59))
-        df_bp = df_bp[(df_bp['processing_date'] >= start_proc) & (df_bp['processing_date'] <= end_proc)].copy()
-        
-        # Define Order List window with GMT+2 offset
-        start_ord_bp = datetime.combine(start_date_bp, time(2, 0, 0))
-        end_ord_bp = datetime.combine(end_date_bp + timedelta(days=1), time(1, 59, 59))
+        # Selected reporting window is GMT+3.
+        start_report_bp = datetime.combine(start_date_bp, time(0, 0, 0))
+        end_report_bp = datetime.combine(end_date_bp, time(23, 59, 59))
+        df_bp = df_bp[
+            (df_bp['Report Datetime (GMT+3)'] >= start_report_bp) &
+            (df_bp['Report Datetime (GMT+3)'] <= end_report_bp)
+        ].copy()
 
         # Sort oldest→newest
         df_bp = df_bp.sort_values("processing_date")
@@ -322,8 +324,8 @@ with tab_bp:
         st.subheader("Step 3: Process BridgerPay Order List from Shared File")
         df_ord2 = get_order_list_for_gateway(df_order_all, "Bridger Pay", id_col="Transaction ID")
         
-        # Filter Order-list with GMT+2 offset window
-        df_ord2 = df_ord2[(df_ord2["Updated At"] >= start_ord_bp) & (df_ord2["Updated At"] <= end_ord_bp)].copy()
+        # Order-list timestamps are already GMT+3.
+        df_ord2 = df_ord2[(df_ord2["Updated At"] >= start_report_bp) & (df_ord2["Updated At"] <= end_report_bp)].copy()
 
         # Merge and amount reconciliation for BP
         df_ord2_sel = df_ord2[["Transaction ID", "Plan Type", "Grand Total"]].copy()
@@ -363,9 +365,9 @@ with tab_bp:
         df_futures2 = df_futures2.sort_values("processing_date")
         df_cfd2 = df_cfd2.sort_values("processing_date")
 
-        # Revenue summary (GMT+6 shift on processing_date)
-        df_futures2["Date"] = (df_futures2["processing_date"] + pd.Timedelta(hours=6)).dt.date
-        df_cfd2["Date"] = (df_cfd2["processing_date"] + pd.Timedelta(hours=6)).dt.date
+        # Revenue summary in GMT+3
+        df_futures2["Date"] = df_futures2["Report Datetime (GMT+3)"].dt.date
+        df_cfd2["Date"] = df_cfd2["Report Datetime (GMT+3)"].dt.date
         df_futures2["Category"] = "Futures"
         df_cfd2["Category"] = "CFD"
         df_summary2 = pd.concat([
@@ -374,7 +376,7 @@ with tab_bp:
         ])
         df_summary2 = df_summary2.groupby(["Date", "Category"], as_index=False).agg(Revenue=("amount", "sum"), Transaction_Count=("amount", "count")).sort_values("Date")
 
-        st.subheader("Datewise Revenue Summary (GMT+6)")
+        st.subheader("Datewise Revenue Summary (GMT+3)")
         display_summary_table(df_summary2)
 
         # Excel output for BP
@@ -412,6 +414,8 @@ with tab_coins:
         else:
             df_coins = pd.read_excel(coins_file, parse_dates=["Created"])
         df_coins["Created"] = df_coins["Created"].dt.tz_localize(None)
+        # Coins Buy timestamps are GMT+0; convert to reporting timezone GMT+3.
+        df_coins["Report Datetime (GMT+3)"] = df_coins["Created"] + pd.Timedelta(hours=3)
 
         # Calculate actual amount as Amount * Rate
         if "Amount" not in df_coins.columns or "Rate" not in df_coins.columns:
@@ -435,22 +439,21 @@ with tab_coins:
         st.info(f"Coins Buy PSP: {len(df_coins)} total transactions")
 
         # Date range selection based on Coins Buy Created date
-        min_date_coins = df_coins['Created'].dt.date.min()
-        max_date_coins = df_coins['Created'].dt.date.max()
+        min_date_coins = df_coins['Report Datetime (GMT+3)'].dt.date.min()
+        max_date_coins = df_coins['Report Datetime (GMT+3)'].dt.date.max()
         col1_coins, col2_coins = st.columns(2)
         with col1_coins:
             start_date_coins = st.date_input("Start date", value=min_date_coins, key="coins_start_date")
         with col2_coins:
             end_date_coins = st.date_input("End date", value=max_date_coins, key="coins_end_date")
         
-        # Filter Coins Buy data for selected window (00:00 to 23:59:59)
-        start_created = datetime.combine(start_date_coins, time(0, 0, 0))
-        end_created = datetime.combine(end_date_coins, time(23, 59, 59))
-        df_coins = df_coins[(df_coins['Created'] >= start_created) & (df_coins['Created'] <= end_created)].copy()
-        
-        # Define Order List window with GMT+2 offset
-        start_ord_coins = datetime.combine(start_date_coins, time(2, 0, 0))
-        end_ord_coins = datetime.combine(end_date_coins + timedelta(days=1), time(1, 59, 59))
+        # Selected reporting window is GMT+3.
+        start_report_coins = datetime.combine(start_date_coins, time(0, 0, 0))
+        end_report_coins = datetime.combine(end_date_coins, time(23, 59, 59))
+        df_coins = df_coins[
+            (df_coins['Report Datetime (GMT+3)'] >= start_report_coins) &
+            (df_coins['Report Datetime (GMT+3)'] <= end_report_coins)
+        ].copy()
 
         # Sort oldest→newest
         df_coins = df_coins.sort_values("Created")
@@ -462,8 +465,8 @@ with tab_coins:
             st.stop()
         df_ord3 = get_order_list_for_gateway(df_order_all, "Crypto", id_col="Tracking ID")
 
-        # Filter Order-list with GMT+2 offset window
-        df_ord3 = df_ord3[(df_ord3["Updated At"] >= start_ord_coins) & (df_ord3["Updated At"] <= end_ord_coins)].copy()
+        # Order-list timestamps are already GMT+3.
+        df_ord3 = df_ord3[(df_ord3["Updated At"] >= start_report_coins) & (df_ord3["Updated At"] <= end_report_coins)].copy()
 
         # Handle blank Tracking ID and match
         mask_blank_tracking = df_coins["Tracking ID"].isna() | (df_coins["Tracking ID"].astype(str).str.strip() == "")
@@ -507,9 +510,9 @@ with tab_coins:
         df_futures3 = df_merged3[df_merged3["Plan Type"].apply(is_futures_plan)].copy()
         df_cfd3 = df_merged3[~df_merged3["Plan Type"].apply(is_futures_plan)].copy()
 
-        # Revenue summary (GMT+6 shift on Created)
-        df_futures3["Date"] = (df_futures3["Created"] + pd.Timedelta(hours=6)).dt.date
-        df_cfd3["Date"] = (df_cfd3["Created"] + pd.Timedelta(hours=6)).dt.date
+        # Revenue summary in GMT+3
+        df_futures3["Date"] = df_futures3["Report Datetime (GMT+3)"].dt.date
+        df_cfd3["Date"] = df_cfd3["Report Datetime (GMT+3)"].dt.date
         df_futures3["Category"] = "Futures"
         df_cfd3["Category"] = "CFD"
         df_summary3 = pd.concat([
@@ -518,7 +521,7 @@ with tab_coins:
         ])
         df_summary3 = df_summary3.groupby(["Date", "Category"], as_index=False).agg(Revenue=("calculated_amount", "sum"), Transaction_Count=("calculated_amount", "count"))
 
-        st.subheader("Datewise Revenue Summary (GMT+6)")
+        st.subheader("Datewise Revenue Summary (GMT+3)")
         display_summary_table(df_summary3)
 
         # Excel output for Coins Buy
@@ -576,6 +579,8 @@ with tab_confirmo:
 
         # Parse datetime and numeric columns
         df_confirmo["CreatedAt"] = pd.to_datetime(df_confirmo["CreatedAt"], format="%d.%m.%Y %H:%M:%S", errors="coerce")
+        # Confirmo timestamps are GMT+0; convert to reporting timezone GMT+3.
+        df_confirmo["Report Datetime (GMT+3)"] = df_confirmo["CreatedAt"] + pd.Timedelta(hours=3)
         numeric_cols_confirmo = ["PaidAmount", "Customer-Settlement Rate", "Credited", "MerchantAmount", "CustomerAmount"]
         for col in numeric_cols_confirmo:
             if col in df_confirmo.columns:
@@ -603,22 +608,21 @@ with tab_confirmo:
         st.info(f"Confirmo PSP: {len(df_confirmo)} clean transactions")
 
         # Date range selection
-        min_date_confirmo = df_confirmo["CreatedAt"].dt.date.min()
-        max_date_confirmo = df_confirmo["CreatedAt"].dt.date.max()
+        min_date_confirmo = df_confirmo["Report Datetime (GMT+3)"].dt.date.min()
+        max_date_confirmo = df_confirmo["Report Datetime (GMT+3)"].dt.date.max()
         col1_conf, col2_conf = st.columns(2)
         with col1_conf:
             start_date_confirmo = st.date_input("Start date", value=min_date_confirmo, key="confirmo_start_date")
         with col2_conf:
             end_date_confirmo = st.date_input("End date", value=max_date_confirmo, key="confirmo_end_date")
 
-        # Filter Confirmo data for selected window
-        start_created_conf = datetime.combine(start_date_confirmo, time(0, 0, 0))
-        end_created_conf = datetime.combine(end_date_confirmo, time(23, 59, 59))
-        df_confirmo = df_confirmo[(df_confirmo["CreatedAt"] >= start_created_conf) & (df_confirmo["CreatedAt"] <= end_created_conf)].copy()
-
-        # Order list window with GMT+2 offset
-        start_ord_conf = datetime.combine(start_date_confirmo, time(2, 0, 0))
-        end_ord_conf = datetime.combine(end_date_confirmo + timedelta(days=1), time(1, 59, 59))
+        # Selected reporting window is GMT+3.
+        start_report_conf = datetime.combine(start_date_confirmo, time(0, 0, 0))
+        end_report_conf = datetime.combine(end_date_confirmo, time(23, 59, 59))
+        df_confirmo = df_confirmo[
+            (df_confirmo["Report Datetime (GMT+3)"] >= start_report_conf) &
+            (df_confirmo["Report Datetime (GMT+3)"] <= end_report_conf)
+        ].copy()
 
         # Sort oldest→newest
         df_confirmo = df_confirmo.sort_values("CreatedAt")
@@ -627,8 +631,8 @@ with tab_confirmo:
         st.subheader("Step 2: Process Confirmo Order List from Shared File")
         df_ord_conf = get_order_list_for_gateway(df_order_all, "Confirmo", id_col="Transaction ID")
 
-        # Filter order-list by time window
-        df_ord_conf = df_ord_conf[(df_ord_conf["Updated At"] >= start_ord_conf) & (df_ord_conf["Updated At"] <= end_ord_conf)].copy()
+        # Order-list timestamps are already GMT+3.
+        df_ord_conf = df_ord_conf[(df_ord_conf["Updated At"] >= start_report_conf) & (df_ord_conf["Updated At"] <= end_report_conf)].copy()
 
         # Match Confirmo ID with Transaction ID using previous logic
         df_ord_conf_sel = df_ord_conf[["Transaction ID", "Plan Type", "Grand Total"]].copy()
@@ -670,9 +674,9 @@ with tab_confirmo:
         df_futures_conf = df_futures_conf.sort_values("CreatedAt")
         df_cfd_conf = df_cfd_conf.sort_values("CreatedAt")
 
-        # Revenue summary (GMT+6 shift on CreatedAt)
-        df_futures_conf["Date"] = (df_futures_conf["CreatedAt"] + pd.Timedelta(hours=6)).dt.date
-        df_cfd_conf["Date"] = (df_cfd_conf["CreatedAt"] + pd.Timedelta(hours=6)).dt.date
+        # Revenue summary in GMT+3
+        df_futures_conf["Date"] = df_futures_conf["Report Datetime (GMT+3)"].dt.date
+        df_cfd_conf["Date"] = df_cfd_conf["Report Datetime (GMT+3)"].dt.date
         df_futures_conf["Category"] = "Futures"
         df_cfd_conf["Category"] = "CFD"
 
@@ -682,7 +686,7 @@ with tab_confirmo:
         ])
         df_summary_conf = df_summary_conf.groupby(["Date", "Category"], as_index=False).agg(Revenue=("Calculated Revenue", "sum"), Transaction_Count=("Calculated Revenue", "count")).sort_values("Date")
 
-        st.subheader("Datewise Revenue Summary (GMT+6)")
+        st.subheader("Datewise Revenue Summary (GMT+3)")
         display_summary_table(df_summary_conf)
 
         # Excel output for Confirmo
@@ -713,180 +717,168 @@ with tab_confirmo:
 
 
 
-# --- PayPal Tab ---
-with tab_paypal:
-    st.header("PayPal vs Order-list")
-    paypal_file = st.file_uploader("Upload PayPal Report File", key="paypal_file", type=["csv", "xlsx"])
+# --- Binance Pay Tab ---
+with tab_binance:
+    st.header("Binance Pay Revenue Report")
+    st.caption("Binance source timezone: GMT+0 (UTC) → reporting timezone: GMT+3")
+    binance_file = st.file_uploader(
+        "Upload Binance Paid Transactions File",
+        key="binance_file",
+        type=["xls", "xlsx", "csv"]
+    )
 
-    if paypal_file and df_order_all is not None:
-        st.subheader("Step 1: Load PayPal File")
+    if binance_file:
+        st.subheader("Step 1: Load Binance File")
 
-        # Load PayPal file
-        if paypal_file.name.lower().endswith('.csv'):
-            df_paypal = pd.read_csv(paypal_file, encoding="utf-8-sig")
+        # Binance exports can have an .xls filename while containing an XLSX workbook.
+        # Read Excel uploads from bytes with openpyxl so both .xls-named and .xlsx files work.
+        if binance_file.name.lower().endswith(".csv"):
+            df_binance = pd.read_csv(binance_file)
         else:
-            df_paypal = pd.read_excel(paypal_file)
+            df_binance = pd.read_excel(io.BytesIO(binance_file.getvalue()), engine="openpyxl")
 
-        required_paypal_cols = ["Date", "Time", "Type", "Status", "Currency", "Gross", "Transaction ID"]
-        missing_paypal_cols = [col for col in required_paypal_cols if col not in df_paypal.columns]
-        if missing_paypal_cols:
-            st.error(f"PayPal file must contain these columns: {', '.join(missing_paypal_cols)}. Found columns: {list(df_paypal.columns)}")
+        required_binance_cols = [
+            "TransactionId",
+            "Product Description",
+            "Merchant Reference",
+            "Transaction Currency",
+            "Transaction Amount",
+            "Transaction date",
+            "Transaction status",
+        ]
+        missing_binance_cols = [col for col in required_binance_cols if col not in df_binance.columns]
+        if missing_binance_cols:
+            st.error(
+                "Binance file must contain these columns: "
+                + ", ".join(missing_binance_cols)
+                + f". Found columns: {list(df_binance.columns)}"
+            )
             st.stop()
 
-        # PayPal report time is UTC-7. Build one datetime column from Date + Time.
-        df_paypal["paypal_datetime_utc_minus_7"] = pd.to_datetime(
-            df_paypal["Date"].astype(str).str.strip() + " " + df_paypal["Time"].astype(str).str.strip(),
-            dayfirst=True,
-            errors="coerce"
-        )
+        # Binance transaction date is GMT+0 / UTC.
+        df_binance["Transaction date"] = pd.to_datetime(
+            df_binance["Transaction date"],
+            errors="coerce",
+            utc=True
+        ).dt.tz_localize(None)
+        df_binance["Report Datetime (GMT+3)"] = df_binance["Transaction date"] + pd.Timedelta(hours=3)
+        df_binance["Transaction Amount"] = pd.to_numeric(df_binance["Transaction Amount"], errors="coerce")
 
-        # Clean Gross amount and use Gross for revenue, as requested.
-        df_paypal["Gross Amount"] = pd.to_numeric(
-            df_paypal["Gross"].astype(str).str.replace(",", "", regex=False).str.replace("$", "", regex=False).str.strip(),
-            errors="coerce"
-        )
+        invalid_binance_date = df_binance["Transaction date"].isna()
+        if invalid_binance_date.any():
+            st.warning(f"Removed {invalid_binance_date.sum()} rows with invalid Transaction date")
+            df_binance = df_binance[~invalid_binance_date].copy()
 
-        # Filter only successful payment rows
-        initial_paypal_count = len(df_paypal)
-        df_paypal = df_paypal[
-            (df_paypal["Type"].astype(str).str.strip().str.lower() == "express checkout payment") &
-            (df_paypal["Status"].astype(str).str.strip().str.lower() == "completed") &
-            (df_paypal["Currency"].astype(str).str.strip().str.upper() == "USD")
+        invalid_binance_amount = df_binance["Transaction Amount"].isna()
+        if invalid_binance_amount.any():
+            st.warning(f"Removed {invalid_binance_amount.sum()} rows with invalid Transaction Amount")
+            df_binance = df_binance[~invalid_binance_amount].copy()
+
+        # Keep only successfully paid transactions.
+        initial_binance_count = len(df_binance)
+        df_binance = df_binance[
+            df_binance["Transaction status"].astype(str).str.strip().str.upper().eq("PAID")
         ].copy()
-        st.info(f"Filtered {initial_paypal_count} → {len(df_paypal)} transactions (Type=Express Checkout Payment, Status=Completed, Currency=USD)")
+        st.info(f"Filtered {initial_binance_count} → {len(df_binance)} transactions (Transaction status=PAID)")
 
-        invalid_paypal_datetime = df_paypal["paypal_datetime_utc_minus_7"].isna()
-        if invalid_paypal_datetime.any():
-            st.warning(f"Removed {invalid_paypal_datetime.sum()} rows with invalid PayPal Date/Time")
-            df_paypal = df_paypal[~invalid_paypal_datetime].copy()
+        # Remove duplicates by Binance TransactionId.
+        st.subheader("Step 2: Remove Duplicates")
+        duplicates_binance = df_binance.duplicated(subset=["TransactionId"], keep=False)
+        if duplicates_binance.any():
+            st.warning(f"Found {duplicates_binance.sum()} duplicate Binance transactions (removed)")
+            df_binance = df_binance.drop_duplicates(subset=["TransactionId"], keep="first")
+        st.info(f"Binance Pay: {len(df_binance)} clean transactions after duplicate removal")
 
-        invalid_gross = df_paypal["Gross Amount"].isna()
-        if invalid_gross.any():
-            st.warning(f"Removed {invalid_gross.sum()} rows with invalid Gross amount")
-            df_paypal = df_paypal[~invalid_gross].copy()
-
-        # Remove duplicate PayPal transaction IDs
-        duplicates_paypal = df_paypal.duplicated(subset=["Transaction ID"], keep=False)
-        if duplicates_paypal.any():
-            st.warning(f"Removed {duplicates_paypal.sum()} duplicate PayPal transactions")
-            df_paypal = df_paypal.drop_duplicates(subset=["Transaction ID"], keep="first")
-        st.info(f"PayPal PSP: {len(df_paypal)} clean transactions")
-
-        if df_paypal.empty:
-            st.warning("No PayPal successful transactions found after filtering.")
+        if df_binance.empty:
+            st.warning("No PAID Binance transactions found after filtering.")
             st.stop()
 
-        # Date range selection based on PayPal report date/time (UTC-7)
-        min_date_paypal = df_paypal["paypal_datetime_utc_minus_7"].dt.date.min()
-        max_date_paypal = df_paypal["paypal_datetime_utc_minus_7"].dt.date.max()
-        col1_ppal, col2_ppal = st.columns(2)
-        with col1_ppal:
-            start_date_paypal = st.date_input("Start date", value=min_date_paypal, key="paypal_start_date")
-        with col2_ppal:
-            end_date_paypal = st.date_input("End date", value=max_date_paypal, key="paypal_end_date")
+        # Select dates in the reporting timezone GMT+3.
+        st.subheader("Step 3: Select Date Range (GMT+3)")
+        min_date_binance = df_binance["Report Datetime (GMT+3)"].dt.date.min()
+        max_date_binance = df_binance["Report Datetime (GMT+3)"].dt.date.max()
+        col1_binance, col2_binance = st.columns(2)
+        with col1_binance:
+            start_date_binance = st.date_input(
+                "Start date", value=min_date_binance, key="binance_start_date"
+            )
+        with col2_binance:
+            end_date_binance = st.date_input(
+                "End date", value=max_date_binance, key="binance_end_date"
+            )
 
-        # Filter PayPal report by selected UTC-7 date window
-        start_paypal = datetime.combine(start_date_paypal, time(0, 0, 0))
-        end_paypal = datetime.combine(end_date_paypal, time(23, 59, 59))
-        df_paypal = df_paypal[
-            (df_paypal["paypal_datetime_utc_minus_7"] >= start_paypal) &
-            (df_paypal["paypal_datetime_utc_minus_7"] <= end_paypal)
+        start_dt_binance = datetime.combine(start_date_binance, time(0, 0, 0))
+        end_dt_binance = datetime.combine(end_date_binance, time(23, 59, 59))
+        df_binance = df_binance[
+            (df_binance["Report Datetime (GMT+3)"] >= start_dt_binance) &
+            (df_binance["Report Datetime (GMT+3)"] <= end_dt_binance)
         ].copy()
+        st.info(f"Filtered to {len(df_binance)} Binance transactions in selected GMT+3 date range")
 
-        # Use the shared combined Order-list and filter only PayPal rows.
-        # For PayPal, PayPal Transaction ID matches Order-list Tracking ID.
-        st.subheader("Step 2: Process PayPal Order List from Shared File")
-        df_ord_paypal = get_order_list_for_gateway(df_order_all, "PayPal", id_col="Tracking ID")
-
-        # PayPal report is UTC-7. Order-list timestamp is ahead by 10 hours in the current reports.
-        start_ord_paypal = start_paypal + timedelta(hours=10)
-        end_ord_paypal = end_paypal + timedelta(hours=10)
-        df_ord_paypal = df_ord_paypal[
-            (df_ord_paypal["Updated At"] >= start_ord_paypal) &
-            (df_ord_paypal["Updated At"] <= end_ord_paypal)
-        ].copy()
-
-        # Match PayPal Transaction ID with Order-list Tracking ID
-        df_ord_paypal_sel = df_ord_paypal[["Tracking ID", "Plan Type", "Grand Total"]].copy()
-        df_merged_paypal = df_paypal.merge(
-            df_ord_paypal_sel,
-            left_on="Transaction ID",
-            right_on="Tracking ID",
-            how="inner"
+        # Split CFD / Futures using Binance Product Description, same direct-file classification approach as PayProcc.
+        st.subheader("Step 4: Split by Category")
+        df_binance["is_futures"] = df_binance["Product Description"].apply(
+            lambda x: "futures" in str(x).lower() if pd.notna(x) else False
+        )
+        df_futures_binance = df_binance[df_binance["is_futures"]].copy()
+        df_cfd_binance = df_binance[~df_binance["is_futures"]].copy()
+        st.info(
+            f"Futures: {len(df_futures_binance)} transactions | "
+            f"CFD: {len(df_cfd_binance)} transactions"
         )
 
-        # Amount mismatch check: PayPal Gross vs Order-list Grand Total
-        mask_amt_paypal = df_merged_paypal["Gross Amount"].round(6) != pd.to_numeric(df_merged_paypal["Grand Total"], errors="coerce").round(6)
-        if mask_amt_paypal.any():
-            st.warning(f"Found {mask_amt_paypal.sum()} amount mismatches in PayPal:")
-            st.dataframe(df_merged_paypal.loc[mask_amt_paypal, ["Transaction ID", "Gross Amount", "Grand Total", "Currency"]])
-        else:
-            st.success("No amount mismatches")
+        # Sort by the reporting timestamp.
+        df_futures_binance = df_futures_binance.sort_values("Report Datetime (GMT+3)")
+        df_cfd_binance = df_cfd_binance.sort_values("Report Datetime (GMT+3)")
 
-        # Handle unmatched PSP entries (add to CFD)
-        unmatched_paypal_psp = df_paypal[~df_paypal["Transaction ID"].isin(df_merged_paypal["Transaction ID"])]
-        if len(unmatched_paypal_psp) > 0:
-            st.warning(f"Found {len(unmatched_paypal_psp)} unmatched PayPal PSP entries - adding to CFD:")
-            st.dataframe(unmatched_paypal_psp[["Transaction ID", "paypal_datetime_utc_minus_7", "Gross Amount", "Currency"]])
-            unmatched_paypal_psp = unmatched_paypal_psp.copy()
-            unmatched_paypal_psp["Plan Type"] = "CFD (Unmatched PSP)"
-            unmatched_paypal_psp["Grand Total"] = unmatched_paypal_psp["Gross Amount"]
-            df_merged_paypal = pd.concat([df_merged_paypal, unmatched_paypal_psp], ignore_index=True)
+        # Revenue summary in GMT+3.
+        st.subheader("Step 5: Revenue Summary (GMT+3)")
+        df_futures_binance["Date"] = df_futures_binance["Report Datetime (GMT+3)"].dt.date
+        df_cfd_binance["Date"] = df_cfd_binance["Report Datetime (GMT+3)"].dt.date
+        df_futures_binance["Category"] = "Futures"
+        df_cfd_binance["Category"] = "CFD"
 
-        st.info(f"Final total: {len(df_merged_paypal)} transactions included in export")
-
-        # Split into Futures vs CFD
-        df_futures_paypal = df_merged_paypal[df_merged_paypal["Plan Type"].apply(is_futures_plan)].copy()
-        df_cfd_paypal = df_merged_paypal[~df_merged_paypal["Plan Type"].apply(is_futures_plan)].copy()
-
-        # Sort by PayPal datetime before export
-        df_futures_paypal = df_futures_paypal.sort_values("paypal_datetime_utc_minus_7")
-        df_cfd_paypal = df_cfd_paypal.sort_values("paypal_datetime_utc_minus_7")
-
-        # Revenue summary in GMT+6. PayPal report is UTC-7, so add 13 hours to convert to GMT+6.
-        df_futures_paypal["Date"] = (df_futures_paypal["paypal_datetime_utc_minus_7"] + pd.Timedelta(hours=13)).dt.date
-        df_cfd_paypal["Date"] = (df_cfd_paypal["paypal_datetime_utc_minus_7"] + pd.Timedelta(hours=13)).dt.date
-        df_futures_paypal["Category"] = "Futures"
-        df_cfd_paypal["Category"] = "CFD"
-
-        df_summary_paypal = pd.concat([
-            df_cfd_paypal[["Date", "Category", "Gross Amount"]],
-            df_futures_paypal[["Date", "Category", "Gross Amount"]]
+        df_summary_binance = pd.concat([
+            df_cfd_binance[["Date", "Category", "Transaction Amount"]],
+            df_futures_binance[["Date", "Category", "Transaction Amount"]]
         ])
-        df_summary_paypal = df_summary_paypal.groupby(["Date", "Category"], as_index=False).agg(
-            Revenue=("Gross Amount", "sum"),
-            Transaction_Count=("Gross Amount", "count")
-        ).sort_values("Date")
+        df_summary_binance = df_summary_binance.groupby(
+            ["Date", "Category"], as_index=False
+        ).agg(
+            Revenue=("Transaction Amount", "sum"),
+            Transaction_Count=("Transaction Amount", "count")
+        ).sort_values(["Date", "Category"])
 
-        st.subheader("Datewise Revenue Summary (GMT+6)")
-        display_summary_table(df_summary_paypal)
+        st.subheader("Datewise Revenue Summary")
+        display_summary_table(df_summary_binance)
 
-        # Excel output for PayPal
-        output_paypal = io.BytesIO()
-        with pd.ExcelWriter(output_paypal, engine="xlsxwriter") as writer:
-            cols_paypal = df_paypal.columns.tolist()
-            if "Gross Amount" not in cols_paypal:
-                cols_paypal.append("Gross Amount")
-            if "paypal_datetime_utc_minus_7" not in cols_paypal:
-                cols_paypal.append("paypal_datetime_utc_minus_7")
-            df_cfd_paypal[cols_paypal].to_excel(writer, sheet_name='CFD', index=False)
-            df_futures_paypal[cols_paypal].to_excel(writer, sheet_name='Futures', index=False)
-            df_summary_paypal.to_excel(writer, sheet_name='Revenue Summary', index=False)
-            for sheet_name, df_out in [('CFD', df_cfd_paypal[cols_paypal]), ('Futures', df_futures_paypal[cols_paypal]), ('Revenue Summary', df_summary_paypal)]:
+        # Excel output for Binance Pay.
+        st.subheader("Step 6: Download Report")
+        output_binance = io.BytesIO()
+        with pd.ExcelWriter(output_binance, engine="xlsxwriter") as writer:
+            df_cfd_binance.to_excel(writer, sheet_name="CFD", index=False)
+            df_futures_binance.to_excel(writer, sheet_name="Futures", index=False)
+            df_summary_binance.to_excel(writer, sheet_name="Revenue Summary", index=False)
+            for sheet_name, df_out in [
+                ("CFD", df_cfd_binance),
+                ("Futures", df_futures_binance),
+                ("Revenue Summary", df_summary_binance),
+            ]:
                 safe_set_column_widths(writer, sheet_name, df_out)
 
         st.download_button(
-            label="Download PayPal Comparison Report",
-            data=output_paypal.getvalue(),
-            file_name="paypal_order_comparison.xlsx",
+            label="Download Binance Pay Revenue Report",
+            data=output_binance.getvalue(),
+            file_name="binance_pay_revenue_report_gmt3.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-        # Store in session state for Summary tab
-        st.session_state['paypal_summary'] = df_summary_paypal.copy()
-        st.session_state['paypal_summary']['Gateway'] = 'PayPal'
+        # Store in session state for Summary tab.
+        st.session_state["binance_summary"] = df_summary_binance.copy()
+        st.session_state["binance_summary"]["Gateway"] = "Binance Pay"
     else:
-        st.info("Please upload the PayPal report file and the shared combined Order-list file from the sidebar.")
+        st.info("Please upload the Binance paid transactions file to generate the GMT+3 revenue report.")
+
 
 # --- PayProcc Tab ---
 with tab_payprocc:
@@ -904,6 +896,8 @@ with tab_payprocc:
         # Parse Transaction Date
         if "Transaction Date" in df_payprocc.columns:
             df_payprocc["Transaction Date"] = pd.to_datetime(df_payprocc["Transaction Date"])
+            # PayProcc uploads are expected to already be in GMT+3. No timezone conversion is applied.
+            df_payprocc["Report Datetime (GMT+3)"] = df_payprocc["Transaction Date"]
         else:
             st.error(f"PayProcc file must contain 'Transaction Date' column. Found columns: {list(df_payprocc.columns)}")
             st.stop()
@@ -936,19 +930,19 @@ with tab_payprocc:
         
         # Date range selection
         st.subheader("Step 3: Select Date Range")
-        min_date_pp = df_payprocc['Transaction Date'].dt.date.min()
-        max_date_pp = df_payprocc['Transaction Date'].dt.date.max()
+        min_date_pp = df_payprocc['Report Datetime (GMT+3)'].dt.date.min()
+        max_date_pp = df_payprocc['Report Datetime (GMT+3)'].dt.date.max()
         col1_pp, col2_pp = st.columns(2)
         with col1_pp:
             start_date_pp = st.date_input("Start date", value=min_date_pp, key="pp_start_date")
         with col2_pp:
             end_date_pp = st.date_input("End date", value=max_date_pp, key="pp_end_date")
         
-        # Filter by date range (already in GMT+6, no offset needed)
+        # Filter by selected GMT+3 reporting date range.
         start_dt_pp = datetime.combine(start_date_pp, time(0, 0, 0))
         end_dt_pp = datetime.combine(end_date_pp, time(23, 59, 59))
-        df_payprocc = df_payprocc[(df_payprocc['Transaction Date'] >= start_dt_pp) & 
-                                   (df_payprocc['Transaction Date'] <= end_dt_pp)].copy()
+        df_payprocc = df_payprocc[(df_payprocc['Report Datetime (GMT+3)'] >= start_dt_pp) & 
+                                   (df_payprocc['Report Datetime (GMT+3)'] <= end_dt_pp)].copy()
         
         st.info(f"Filtered to {len(df_payprocc)} transactions in selected date range")
         
@@ -980,10 +974,10 @@ with tab_payprocc:
         df_futures_pp = df_futures_pp.sort_values("Transaction Date")
         df_cfd_pp = df_cfd_pp.sort_values("Transaction Date")
         
-        # Revenue summary (already in GMT+6)
-        st.subheader("Step 6: Revenue Summary (GMT+6)")
-        df_futures_pp["Date"] = df_futures_pp["Transaction Date"].dt.date
-        df_cfd_pp["Date"] = df_cfd_pp["Transaction Date"].dt.date
+        # Revenue summary in GMT+3
+        st.subheader("Step 6: Revenue Summary (GMT+3)")
+        df_futures_pp["Date"] = df_futures_pp["Report Datetime (GMT+3)"].dt.date
+        df_cfd_pp["Date"] = df_cfd_pp["Report Datetime (GMT+3)"].dt.date
         df_futures_pp["Category"] = "Futures"
         df_cfd_pp["Category"] = "CFD"
         
@@ -1047,13 +1041,14 @@ with tab_summary:
         summaries.append(st.session_state['confirmo_summary'])
         gateways_processed.append("Confirmo")
 
+    if 'binance_summary' in st.session_state:
+        summaries.append(st.session_state['binance_summary'])
+        gateways_processed.append("Binance Pay")
+
     if 'payprocc_summary' in st.session_state:
         summaries.append(st.session_state['payprocc_summary'])
         gateways_processed.append("PayProcc")
 
-    if 'paypal_summary' in st.session_state:
-        summaries.append(st.session_state['paypal_summary'])
-        gateways_processed.append("PayPal")
     
     if summaries:
         # Combine all summaries
@@ -1154,9 +1149,9 @@ with tab_summary:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.info("Please process at least one gateway (ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, or PayPal) to see the combined summary.")
+        st.info("Please process at least one gateway (ZEN, BridgerPay, Coins Buy, Confirmo, Binance Pay, or PayProcc) to see the combined summary.")
         st.write("**Instructions:**")
-        st.write("1. Go to any gateway tab (ZEN, BridgerPay, Coins Buy, Confirmo, PayProcc, or PayPal)")
+        st.write("1. Go to any gateway tab (ZEN, BridgerPay, Coins Buy, Confirmo, Binance Pay, or PayProcc)")
         st.write("2. Upload the required files and generate the report")
         st.write("3. Return to this Summary tab to see the combined data")
 

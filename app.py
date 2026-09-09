@@ -48,12 +48,13 @@ st.caption(
 # Create seven tabs: ZEN, BridgerPay, Coins Buy, Confirmo, Binance Pay, PayProcc, and Summary
 tab_zen, tab_bp, tab_coins, tab_confirmo, tab_binance, tab_payprocc, tab_summary = st.tabs(["ZEN", "BridgerPay", "Coins Buy", "Confirmo", "Binance Pay", "PayProcc", "Summary"])
 
-# Futures filtering function - checks if "Futures" is in the Plan Type name
+# Futures classification shared by Order List plans and PSP descriptions
 def is_futures_plan(plan_type):
-    """Check if a plan type contains 'Futures' (case-insensitive)"""
+    """Recognize names containing Futures or the FNL:003 identifier."""
     if pd.isna(plan_type):
         return False
-    return "futures" in str(plan_type).lower()
+    normalized = " ".join(str(plan_type).lower().split())
+    return "futures" in normalized or "fnl:003" in normalized
 
 
 def safe_set_column_widths(writer, sheet_name, df_out):
@@ -786,7 +787,7 @@ with tab_binance:
         # Split CFD / Futures using Binance Product Description, same direct-file classification approach as PayProcc.
         st.subheader("Step 3: Split by Category")
         df_binance["is_futures"] = df_binance["Product Description"].apply(
-            lambda x: "futures" in str(x).lower() if pd.notna(x) else False
+            is_futures_plan
         )
         df_futures_binance = df_binance[df_binance["is_futures"]].copy()
         df_cfd_binance = df_binance[~df_binance["is_futures"]].copy()
@@ -919,7 +920,7 @@ with tab_payprocc:
         
         # Check if Description contains "futures" (case-insensitive)
         df_payprocc["is_futures"] = df_payprocc["Description"].apply(
-            lambda x: "futures" in str(x).lower() if pd.notna(x) else False
+            is_futures_plan
         )
         
         df_futures_pp = df_payprocc[df_payprocc["is_futures"]].copy()

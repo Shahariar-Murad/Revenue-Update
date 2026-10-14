@@ -50,11 +50,15 @@ tab_zen, tab_bp, tab_coins, tab_confirmo, tab_binance, tab_payprocc, tab_summary
 
 # Futures classification shared by Order List plans and PSP descriptions
 def is_futures_plan(plan_type):
-    """Recognize names containing Futures or the FNL:003 identifier."""
+    """Recognize Futures plans, FNL:003 plans, and Direct 50000 USD."""
     if pd.isna(plan_type):
         return False
     normalized = " ".join(str(plan_type).lower().split())
-    return "futures" in normalized or "fnl:003" in normalized
+    return (
+        "futures" in normalized
+        or "fnl:003" in normalized
+        or "direct 50000 usd" in normalized
+    )
 
 
 def safe_set_column_widths(writer, sheet_name, df_out):

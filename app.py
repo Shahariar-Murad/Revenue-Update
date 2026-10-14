@@ -101,6 +101,15 @@ def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction I
         df_order_all["Gateway"].astype(str).str.strip().eq(gateway_name)
     ].copy()
 
+    # Direct 50000 USD is stored in Plan Name, while the reconciliation tabs
+    # classify using Plan Type. Map only this plan so it is treated as Futures.
+    if "Plan Name" in df_ord.columns:
+        direct_50k_mask = (
+            df_ord["Plan Name"].astype(str).str.strip().str.casefold()
+            == "direct 50000 usd"
+        )
+        df_ord.loc[direct_50k_mask, "Plan Type"] = "Direct 50000 USD"
+
     if df_ord.empty:
         st.error(f"No Order-list rows found for Gateway='{gateway_name}' in the uploaded combined Order-list.")
         st.stop()

@@ -83,11 +83,24 @@ def display_summary_table(df):
 
 @st.cache_data
 def load_shared_order_list(file_content, filename):
-    """Load one combined Order-list file and parse dates once."""
+    """Load Order-list data and convert backend GMT+2 timestamps to GMT+3."""
     if filename.lower().endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_content), parse_dates=["Updated At", "Created At"])
     else:
         df = pd.read_excel(io.BytesIO(file_content), parse_dates=["Updated At", "Created At"])
+
+    # The backend Order-list exports naive timestamps in GMT+2, while every
+    # report in this app uses GMT+3. Convert before any filter or reconciliation.
+    for column in ["Updated At", "Created At"]:
+        if column not in df.columns:
+            continue
+        timestamps = pd.to_datetime(df[column], format="mixed", errors="coerce")
+        if timestamps.dt.tz is not None:
+            # An export with an explicit offset is converted directly, avoiding
+            # a second manual one-hour shift.
+            df[column] = timestamps.dt.tz_convert("Etc/GMT-3").dt.tz_localize(None)
+        else:
+            df[column] = timestamps + pd.Timedelta(hours=1)
     return df
 
 def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction ID", remove_blank_id=True):
@@ -132,7 +145,7 @@ def get_order_list_for_gateway(df_order_all, gateway_name, id_col="Transaction I
 
 # Shared Order-list upload for ZEN, BridgerPay, Coins Buy, and Confirmo
 st.sidebar.header("Shared Order-list")
-st.sidebar.caption("Reporting timezone: GMT+3 | Date period is selected above the tabs")
+st.sidebar.caption("Reporting timezone: GMT+3 | Backend Order-list source: GMT+2 → GMT+3")
 shared_order_file = st.sidebar.file_uploader(
     "Upload Combined Order-list File",
     key="shared_order_file",
@@ -344,7 +357,7 @@ with tab_bp:
         st.subheader("Step 3: Process BridgerPay Order List from Shared File")
         df_ord2 = get_order_list_for_gateway(df_order_all, "Bridger Pay", id_col="Transaction ID")
         
-        # Order-list timestamps are already GMT+3.
+        # Order-list timestamps were converted from backend GMT+2 to GMT+3 on load.
         df_ord2 = df_ord2[(df_ord2["Updated At"] >= global_start_report) & (df_ord2["Updated At"] <= global_end_report)].copy()
 
         # Merge and amount reconciliation for BP
@@ -474,7 +487,7 @@ with tab_coins:
             st.stop()
         df_ord3 = get_order_list_for_gateway(df_order_all, "Crypto", id_col="Tracking ID")
 
-        # Order-list timestamps are already GMT+3.
+        # Order-list timestamps were converted from backend GMT+2 to GMT+3 on load.
         df_ord3 = df_ord3[(df_ord3["Updated At"] >= global_start_report) & (df_ord3["Updated At"] <= global_end_report)].copy()
 
         # Handle blank Tracking ID and match
@@ -629,7 +642,7 @@ with tab_confirmo:
         st.subheader("Step 2: Process Confirmo Order List from Shared File")
         df_ord_conf = get_order_list_for_gateway(df_order_all, "Confirmo", id_col="Transaction ID")
 
-        # Order-list timestamps are already GMT+3.
+        # Order-list timestamps were converted from backend GMT+2 to GMT+3 on load.
         df_ord_conf = df_ord_conf[(df_ord_conf["Updated At"] >= global_start_report) & (df_ord_conf["Updated At"] <= global_end_report)].copy()
 
         # Match Confirmo ID with Transaction ID using previous logic
